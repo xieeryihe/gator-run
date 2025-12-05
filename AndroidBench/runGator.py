@@ -136,17 +136,16 @@ class ProjectS:
             pass
         else:
             fatalError("Unknown project type, abort!")
-        if (SootGlobalConfig.bDebug):
-            print(cmdLine)
         os.chdir(pcwd)
         print(self.name + " FINISHED")
 
 def parseEclipseProject(eclipseProjDir):
     depLibs = ""
-    classPath = eclipseProjDir + "/bin/classes"
-    resPath = eclipseProjDir + "/res"
+    classPath = os.path.join(eclipseProjDir, "bin", "classes")
+    resPath = os.path.join(eclipseProjDir, "res")
     #Open the project.properties file
-    projProp = open(eclipseProjDir + "/project.properties", "r")
+    projPropPath = os.path.join(eclipseProjDir, "project.properties")
+    projProp = open(projPropPath, "r")
     projLines = projProp.readlines()
     projProp.close()
     for curLine in projLines:
@@ -154,16 +153,16 @@ def parseEclipseProject(eclipseProjDir):
             #There is a library class declearation
             pathStr = curLine[curLine.find("=") + 1:]
             pathStr = pathStr.strip()
-            if pathStr.startswith("/"):
+            if os.path.isabs(pathStr):
                 #It is an absolute path
-                depLibs += ":" + pathStr + "/bin/classes"
-                resPath += ":" + pathStr + "/res"
+                depLibs += os.pathsep + os.path.join(pathStr, "bin", "classes")
+                resPath += os.pathsep + os.path.join(pathStr, "res")
             else:
                 #It is a relative path
-                depLibs += ":" + eclipseProjDir + "/" + pathStr + "/bin/classes"
-                resPath += ":" + eclipseProjDir + "/" + pathStr + "/res"
-    if depLibs.startswith(":"):
-        depLibs = depLibs[1:]
+                depLibs += os.pathsep + os.path.join(eclipseProjDir, pathStr, "bin", "classes")
+                resPath += os.pathsep + os.path.join(eclipseProjDir, pathStr, "res")
+    if depLibs.startswith(os.pathsep):
+        depLibs = depLibs[len(os.pathsep):]
     return (classPath, resPath, depLibs)
 
 def pathExists(pathName):
@@ -180,7 +179,7 @@ def extractLibsFromPath(pathName):
         return ""
     ret = ""
     for item in fileList:
-        ret += ':' + item
+        ret += os.pathsep + item
     return ret;
 
 def invokeGatorOnProject(\
@@ -193,8 +192,8 @@ def invokeGatorOnProject(\
                 benchmarkName,
                 options):
     ''''''
-    SootAndroidLocation = SootGlobalConfig.GatorRoot + "/SootAndroid"
-    sdkLocation = SootGlobalConfig.ADKLocation
+    SootAndroidLocation = os.path.normpath(os.path.join(SootGlobalConfig.GatorRoot, "SootAndroid"))
+    sdkLocation = os.path.normpath(SootGlobalConfig.ADKLocation)
     bGoogleAPI = False
     if len(apiLevel) > 6:
         if apiLevel[:6] == "google":
@@ -205,29 +204,135 @@ def invokeGatorOnProject(\
     except:
         fatalError("FATALERROR: API Level not valid")
     if (bGoogleAPI):
-        GoogleAPIDir = sdkLocation + \
-            "/add-ons/addon-google_apis-google-" + sLevelNum
+        GoogleAPIDir = os.path.normpath(os.path.join(sdkLocation, 
+            "add-ons", "addon-google_apis-google-" + sLevelNum))
         if not pathExists(GoogleAPIDir) :
             print("Google API Level:" + sLevelNum + "Not installed!")
             sys.exit(-1);
-        GoogleAPI = extractLibsFromPath(GoogleAPIDir + "/libs")
-    PlatformAPIDir = sdkLocation + \
-            "/platforms/" + "android-" + str(iLevelNum)
-    ClassPathJar = extractLibsFromPath("{0}/lib".format(SootAndroidLocation));
-    ClassPathJar = ":{0}/bin".format(SootAndroidLocation) + ClassPathJar
-    PlatformJar = "{0}/platforms/android-".format(sdkLocation) + sLevelNum +"/android.jar"
+        GoogleAPI = extractLibsFromPath(os.path.join(GoogleAPIDir, "libs"))
+    PlatformAPIDir = os.path.normpath(os.path.join(sdkLocation,
+            "platforms", "android-" + str(iLevelNum)))
+    # 强制包含 sootclasses.jar
+    sootJarPath = os.path.normpath(os.path.join(SootAndroidLocation, "lib", "sootclasses.jar"))
+    ClassPathJar = extractLibsFromPath(os.path.join(SootAndroidLocation, "lib"))
+    ClassPathJar = os.path.normpath(os.path.join(SootAndroidLocation, "bin")) + os.pathsep + sootJarPath + ClassPathJar
+    # 修正 classPath，确保不为空且路径存在
+    if not classPath or not os.path.exists(classPath):
+        classPath = os.path.normpath(os.path.join(SootAndroidLocation, "bin"))
+    PlatformJar = os.path.normpath(os.path.join(sdkLocation, "platforms", "android-" + sLevelNum, "android.jar"))
     if bGoogleAPI:
-        PlatformJar += ":" + GoogleAPI
+        PlatformJar += GoogleAPI
     if iLevelNum >= 14:
-        PlatformJar+=":" + "{0}/deps/android-support-annotations.jar:{0}/deps/android-support-v4.jar:{0}/deps/android-support-v7-appcompat.jar:{0}/deps/android-support-v7-cardview.jar:{0}/deps/android-support-v7-gridlayout.jar:{0}/deps/android-support-v7-mediarouter.jar:{0}/deps/android-support-v7-palette.jar:{0}/deps/android-support-v7-preference.jar::{0}/deps/android-support-v7-recyclerview.jar".format(SootAndroidLocation)
+        supportLibs = [
+            "android-support-annotations.jar",
+            "android-support-v4.jar", 
+            "android-support-v7-appcompat.jar",
+            "android-support-v7-cardview.jar",
+            "android-support-v7-gridlayout.jar",
+            "android-support-v7-mediarouter.jar",
+            "android-support-v7-palette.jar",
+            "android-support-v7-preference.jar",
+            "android-support-v7-recyclerview.jar"
+        ]
+        for lib in supportLibs:
+            PlatformJar += os.pathsep + os.path.normpath(os.path.join(SootAndroidLocation, "deps", lib))
     if extraLib != None and extraLib != "":
-        PlatformJar+=":" + extraLib
+        # extraLib 可能包含冒号分隔的路径列表，需要转换为当前系统的分隔符
+        extraLibPaths = extraLib.replace(":", os.pathsep).split(os.pathsep)
+        for libPath in extraLibPaths:
+            if libPath.strip():
+                PlatformJar += os.pathsep + os.path.normpath(libPath.strip())
+    
+    # 获取 JRE 路径和 Java 版本
+    jreLib = ""
+    javaVersion = 8  # 默认假设 Java 8
+    
+    # 检测 Java 版本
+    try:
+        versionOutput = subprocess.check_output(['java', '-version'], 
+                                              stderr=subprocess.STDOUT,
+                                              universal_newlines=True)
+        # 解析版本号（例如 "18.0.2.1" 或 "1.8.0_xxx"）
+        import re
+        match = re.search(r'version "(\d+)\.(\d+)', versionOutput)
+        if match:
+            majorVer = int(match.group(1))
+            if majorVer == 1:
+                # 旧版本格式 "1.8.x"
+                javaVersion = int(match.group(2))
+            else:
+                # 新版本格式 "9.x", "11.x", "18.x" 等
+                javaVersion = majorVer
+    except Exception as e:
+        if SootGlobalConfig.bDebug:
+            print("Warning: Could not detect Java version:", e)
+    
+    # 根据 Java 版本获取适当的库路径
+    javaHome = os.environ.get("JAVA_HOME")
+    if not javaHome:
+        # 尝试从 java 命令推断
+        try:
+            javaCmd = subprocess.check_output(['where' if sys.platform == 'win32' else 'which', 'java'], 
+                                            stderr=subprocess.STDOUT,
+                                            universal_newlines=True).strip().split('\n')[0]
+            javaHome = os.path.dirname(os.path.dirname(javaCmd))
+        except Exception:
+            pass
+    
+    if javaHome and javaVersion >= 9:
+        # Java 9+ 使用模块系统，不需要 rt.jar
+        # 我们将使用空的 jreLib，Soot 会自动处理
+        jreLib = ""
+        if SootGlobalConfig.bDebug:
+            print(f"Detected Java {javaVersion}, using module system")
+    elif javaHome:
+        # Java 8 及以下，查找 rt.jar
+        rtJar = os.path.join(javaHome, "jre", "lib", "rt.jar")
+        if os.path.exists(rtJar):
+            jreLib = rtJar
+        else:
+            # 某些 JDK 的 rt.jar 直接在 lib 目录
+            rtJar = os.path.join(javaHome, "lib", "rt.jar")
+            if os.path.exists(rtJar):
+                jreLib = rtJar
+        
+        if SootGlobalConfig.bDebug:
+            print(f"Detected Java {javaVersion}, rt.jar: {jreLib if jreLib else 'Not found'}")
+    
     #Finished computing platform libraries
     callList = [\
                 'java', \
-                '-Xmx12G', \
+                '-Xmx12G']\
+    
+    # 对于 Java 9+，设置模块相关选项和必需的系统属性
+    if javaVersion >= 9:
+        # Java 9+ 需要添加模块访问权限
+        callList.extend([
+            '--add-opens', 'java.base/java.lang=ALL-UNNAMED',
+            '--add-opens', 'java.base/java.util=ALL-UNNAMED',
+            '--add-opens', 'java.base/java.io=ALL-UNNAMED'
+        ])
+        # 设置 Soot 需要的系统属性（Java 9+ 中这些属性已被移除）
+        callList.extend([
+            '-Djava.class.path=' + ClassPathJar,
+            '-Dsun.boot.class.path=',
+            '-Djava.ext.dirs=',
+            '-Djava.endorsed.dirs='
+        ])
+    elif jreLib:
+        # 只在 Java 8 且有 rt.jar 时设置 sun.boot.class.path
+        callList.extend(['-Dsun.boot.class.path=' + jreLib])
+    
+    callList.extend([\
                 '-classpath', ClassPathJar, \
-                'presto.android.Main', \
+                'presto.android.Main'])
+    
+    # 只在 Java 8 且有 jreLib 时添加 -jre 参数
+    if javaVersion < 9 and jreLib:
+        callList.extend(['-jre', jreLib])
+    
+    # 添加其余参数
+    callList.extend([\
                 '-project', projPath,\
                 '-android', PlatformJar,\
                 '-sdkDir', sdkLocation,\
@@ -237,10 +342,16 @@ def invokeGatorOnProject(\
                 '-apiLevel', "android-" + sLevelNum,\
                 '-benchmarkName', benchmarkName,\
                 '-guiAnalysis',
-                '-listenerSpecFile', SootAndroidLocation + "/listeners.xml",
-                '-wtgSpecFile', SootAndroidLocation + '/wtg.xml']
+                '-listenerSpecFile', os.path.normpath(os.path.join(SootAndroidLocation, "listeners.xml")),\
+                '-wtgSpecFile', os.path.normpath(os.path.join(SootAndroidLocation, 'wtg.xml'))])
     options = options.split()
     callList.extend(options);
+    
+    # 调试输出
+    if SootGlobalConfig.bDebug:
+        print("JRE Lib:", jreLib)
+        print("Command:", ' '.join(callList))
+    
     subprocess.call(callList)
     pass
 
@@ -381,7 +492,7 @@ def determinGatorRootAndSDKPath():
         SootGlobalConfig.GatorRoot = gatorRoot
     else:
         curPath = os.getcwd()
-        curPathNames = curPath.split('/')
+        curPathNames = curPath.replace('\\', '/').split('/')
         lastDirName = "";
         for i in reversed(range(len(curPathNames))):
             if curPathNames[i] != '':
@@ -389,7 +500,7 @@ def determinGatorRootAndSDKPath():
                 break
             pass
         if lastDirName == "AndroidBench":
-            SootGlobalConfig.GatorRoot = getParentDir(curPath)
+            SootGlobalConfig.GatorRoot = os.path.dirname(curPath)
             os.environ['GatorRoot'] = SootGlobalConfig.GatorRoot
         else:
             fatalError("GatorRoot environment variable is not defined")
@@ -398,18 +509,31 @@ def determinGatorRootAndSDKPath():
         SootGlobalConfig.ADKLocation = adkRoot
     else:
         homeDir = os.environ.get("HOME")
-        if homeDir == None:
+        userProfile = os.environ.get("USERPROFILE")  # Windows 用户目录
+        if homeDir == None and userProfile == None:
             fatalError("ADK environment variable is not defined")
-        if sys.platform == "linux2":
-            if pathExists(homeDir + "/Android/Sdk"):
-                SootGlobalConfig.ADKLocation = homeDir+"/Android/Sdk"
+        if homeDir == None:
+            homeDir = userProfile
+        if sys.platform == "linux2" or sys.platform == "linux":
+            if pathExists(os.path.join(homeDir, "Android", "Sdk")):
+                SootGlobalConfig.ADKLocation = os.path.join(homeDir, "Android", "Sdk")
             else:
                 fatalError("ADK environment variable is not defined")
         elif sys.platform == "darwin":
-            if pathExists(homeDir + "/Library/Android/sdk"):
-                SootGlobalConfig.ADKLocation = homeDir + "/Library/Android/sdk"
+            if pathExists(os.path.join(homeDir, "Library", "Android", "sdk")):
+                SootGlobalConfig.ADKLocation = os.path.join(homeDir, "Library", "Android", "sdk")
             else:
                 fatalError("ADK environment variable is not defined")
+        elif sys.platform == "win32":
+            # Windows 平台
+            if pathExists(os.path.join(homeDir, "AppData", "Local", "Android", "Sdk")):
+                SootGlobalConfig.ADKLocation = os.path.join(homeDir, "AppData", "Local", "Android", "Sdk")
+            elif pathExists(os.path.join(homeDir, "Android", "Sdk")):
+                SootGlobalConfig.ADKLocation = os.path.join(homeDir, "Android", "Sdk")
+            else:
+                fatalError("ADK environment variable is not defined")
+        else:
+            fatalError("ADK environment variable is not defined")
         os.environ['ADK'] = SootGlobalConfig.ADKLocation
         pass
     pass

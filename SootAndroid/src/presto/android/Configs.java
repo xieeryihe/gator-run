@@ -209,11 +209,13 @@ public class Configs {
 
     numericApiLevel = Integer.parseInt(apiLevel.substring("android-".length()));
     sysProj = Configs.sdkDir + "/platforms/" + Configs.apiLevel + "/data";
-    if (resourceLocation.indexOf(":") == -1) {
+    // Use semicolon as separator to avoid conflicts with Windows drive letters (C:, D:, etc.)
+    String pathSeparator = ";";
+    if (resourceLocation.indexOf(pathSeparator) == -1) {
       //Only 1 res directory existed
       resourceLocationList.add(resourceLocation);
     } else {
-      String[] resourceLocArray = resourceLocation.split(":");
+      String[] resourceLocArray = resourceLocation.split(pathSeparator);
       resourceLocationList.addAll(Arrays.asList(resourceLocArray));
       resourceLocation = resourceLocationList.get(0);
     }

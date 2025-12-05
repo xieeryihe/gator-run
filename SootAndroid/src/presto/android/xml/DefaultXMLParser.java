@@ -1324,9 +1324,15 @@ class DefaultXMLParser extends AbstractXMLParser {
       if (!valuesDirectory.exists()) {
         System.out.println(
             "[WARNING] Directory " + valuesDirectory + " does not exist!");
-        return Lists.newArrayList();
+        continue;  // Skip this directory instead of returning empty list
       }
-      for (String file : valuesDirectory.list()) {
+      String[] fileList = valuesDirectory.list();
+      if (fileList == null) {
+        System.out.println(
+            "[WARNING] Cannot list files in directory " + valuesDirectory);
+        continue;
+      }
+      for (String file : fileList) {
         if (file.equals("strings.xml")
             || (file.startsWith("strings-") && file.endsWith(".xml"))) {
           xmlFiles.add(valuesDirectoryName + file);

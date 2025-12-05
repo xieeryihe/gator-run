@@ -727,7 +727,7 @@ public class Handlers {
         } else if (isOpenManager() && title.equals("Move(Cut) File")) {
           code += "handleMenuItemByText(\"Move\\\\(Cut\\\\) File\");";
         } else if (isAPV() && title.equals("Clear find")) {
-          code += "solo.clickOnText(\"Find…\");\n" +
+          code += "solo.clickOnText(\"Find\");\n" +
               "solo.typeText(0, \"a\");\n" +
               "solo.clickOnButton(\"Find\");\n" +
               "solo.sleep(2000);\n" +

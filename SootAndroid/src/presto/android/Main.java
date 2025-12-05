@@ -132,12 +132,13 @@ public class Main {
    * @param args
    */
   static void checkAndPrintEnvironmentInformation(String[] args) {
-    // Now, we only support *nix systems. SootAndroid has been tested on Ubuntu
-    // and Mac OS X.
+    // Now, we support *nix systems and Windows. SootAndroid has been tested on Ubuntu,
+    // Mac OS X, and Windows.
     String OS = System.getProperty("os.name").toLowerCase();
-    if (OS.indexOf("win") >= 0) {
-      throw new RuntimeException("Windows detected!");
-    }
+    // Removed Windows check - now allowing Windows platform
+    // if (OS.indexOf("win") >= 0) {
+    //   throw new RuntimeException("Windows detected!");
+    // }
 
     // Print out some information about the execution commands.
     if (Configs.verbose) {
@@ -165,16 +166,16 @@ public class Main {
    * Computes the classpath to be used by soot.
    */
   static String computeClasspath() {
-    // Compute classpath
+    // Compute classpath - use File.pathSeparator for cross-platform compatibility
     StringBuffer classpathBuffer =
-        new StringBuffer(Configs.android + ":" + Configs.jre);
+        new StringBuffer(Configs.android + File.pathSeparator + Configs.jre);
     for (String s : Configs.depJars) {
-      classpathBuffer.append(":" + s);
+      classpathBuffer.append(File.pathSeparator + s);
     }
 
     // TODO(tony): add jar files of third-party libraries if necessary
     for (String s : Configs.extLibs) {
-      classpathBuffer.append(":" + s + "/bin/classes");
+      classpathBuffer.append(File.pathSeparator + s + File.separator + "bin" + File.separator + "classes");
     }
 
     return classpathBuffer.toString();
