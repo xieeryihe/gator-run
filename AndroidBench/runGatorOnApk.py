@@ -232,19 +232,30 @@ def runGatorOnAPKDirect(apkFileName, GatorOptions, keepdecodedDir, output = None
       configs = GlobalConfigs()
     if configs.GATOR_ROOT == "" or configs.ADK_ROOT == "":
         determinGatorRootAndSDKPath(configs)
-    decodeDir = tempfile.mkdtemp()
+    
+    # Extract app name from apk file
+    pathElements = apkFileName.split("/")
+    apkBaseName = pathElements[-1]
+    appName = apkBaseName.replace(".apk", "").replace(".zip", "")
+    
+    # Create output directory structure: output/app_name/
+    outputBaseDir = os.path.join(configs.GATOR_ROOT, "output", appName)
+    decodeDir = os.path.join(outputBaseDir, "source")
+    os.makedirs(decodeDir, exist_ok=True)
+    
     if output == None:
-      print("Extract APK at: " + decodeDir)
+      print("Extract APK to: " + decodeDir)
+      print("Results will be saved to: " + os.path.join(outputBaseDir, "results"))
     else:
-      output.write("Extract APK at: " + decodeDir + "\n")
+      output.write("Extract APK to: " + decodeDir + "\n")
+      output.write("Results will be saved to: " + os.path.join(outputBaseDir, "results") + "\n")
+    
     configs.KEEP_DECODE = keepdecodedDir
     configs.APK_NAME = apkFileName
     configs.GATOR_OPTIONS = GatorOptions
 
     decodeAPK(configs.APK_NAME, decodeDir, output = output)
     numAPILevel = determinAPILevel(decodeDir, configs)
-    pathElements = apkFileName.split("/")
-    apkFileName = pathElements[-1]
 
     manifestPath = decodeDir + "/AndroidManifest.xml"
     resPath = decodeDir + "/res"
@@ -254,7 +265,7 @@ def runGatorOnAPKDirect(apkFileName, GatorOptions, keepdecodedDir, output = None
                 manifestPath = manifestPath,\
                 apiLevel = "android-{0}".format(numAPILevel), \
                 sdkLocation = configs.ADK_ROOT, \
-                benchmarkName = apkFileName,\
+                benchmarkName = appName,\
                 options = configs.GATOR_OPTIONS,
                 configs = configs,
                 output = output,
@@ -266,6 +277,11 @@ def runGatorOnAPKDirect(apkFileName, GatorOptions, keepdecodedDir, output = None
           print("Extracted APK resources removed!")
         else:
           output.write("Extracted APK resources removed!")
+    else:
+        if output == None:
+          print("Source code preserved at: " + decodeDir)
+        else:
+          output.write("Source code preserved at: " + decodeDir + "\n")
     return retval
 
 def main():

@@ -1,4 +1,8 @@
-import os, sys
+# 禁止生成 __pycache__ 
+import sys
+sys.dont_write_bytecode = True
+
+import os
 import json, subprocess, glob
 import runGatorOnApk as runApk
 
@@ -70,7 +74,9 @@ class ProjectS:
     def execute(self):
         configFile = SootGlobalConfig.ConfigFile
         if configFile != "":
-            dirName = configFile[:configFile.find('.')]
+            # Extract only the filename without path (e.g., "apv/config.json" -> "config")
+            baseName = os.path.basename(configFile)
+            dirName = baseName[:baseName.find('.')]
         else:
             dirName = "output"
         pathName = SootGlobalConfig.CurrentWorkingDir + "/" + dirName
@@ -668,13 +674,9 @@ def main():
             for curItem in SootGlobalConfig.projList:
                 if (SootGlobalConfig.bExact and curStr == curItem.name) or ((not SootGlobalConfig.bExact) and curStr in curItem.name ):
                     curItem.execute()
-                    if not SootGlobalConfig.bSilent:
-                        waitForEnter()
     else:
         for curItem in SootGlobalConfig.projList:
             curItem.execute()
-            if not SootGlobalConfig.bSilent:
-                waitForEnter()
     print("All Done!")
     pass
 
