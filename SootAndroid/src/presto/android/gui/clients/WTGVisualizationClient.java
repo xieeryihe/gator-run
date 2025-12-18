@@ -87,7 +87,7 @@ public class WTGVisualizationClient implements GUIAnalysisClient {
     private String generateDotFile(WTG wtg) {
         String dotFilePath = null;
         try {
-            // Create output directory structure: output/app_name/results/
+            // Create output directory structure: output/app_name/
             String baseDir = new File(".").getCanonicalPath();
             // Navigate to project root
             if (baseDir.endsWith("viz-demo")) {
@@ -102,10 +102,10 @@ public class WTGVisualizationClient implements GUIAnalysisClient {
                     baseDir = new File(baseDir).getParentFile().getCanonicalPath();
                 }
             }
-            String outputDir = baseDir + "/output/" + Configs.benchmarkName + "/results";
+            String outputDir = baseDir + "/output/" + Configs.benchmarkName;
             new File(outputDir).mkdirs();
             
-            dotFilePath = outputDir + "/" + Configs.benchmarkName + "_wtg.dot";
+            dotFilePath = outputDir + "/wtg.dot";
             FileWriter output = new FileWriter(dotFilePath);
             BufferedWriter writer = new BufferedWriter(output);
             
@@ -180,7 +180,7 @@ public class WTGVisualizationClient implements GUIAnalysisClient {
     private String generateHTMLViewer(WTG wtg, String dotFilePath) {
         String htmlFilePath = null;
         try {
-            // Create output directory structure: output/app_name/results/
+            // Create output directory structure: output/app_name/
             String baseDir = new File(".").getCanonicalPath();
             // Navigate to project root
             if (baseDir.endsWith("viz-demo")) {
@@ -195,10 +195,10 @@ public class WTGVisualizationClient implements GUIAnalysisClient {
                     baseDir = new File(baseDir).getParentFile().getCanonicalPath();
                 }
             }
-            String outputDir = baseDir + "/output/" + Configs.benchmarkName + "/results";
+            String outputDir = baseDir + "/output/" + Configs.benchmarkName;
             new File(outputDir).mkdirs();
             
-            htmlFilePath = outputDir + "/" + Configs.benchmarkName + "_wtg_viewer.html";
+            htmlFilePath = outputDir + "/wtg_viewer.html";
             FileWriter output = new FileWriter(htmlFilePath);
             BufferedWriter writer = new BufferedWriter(output);
             
@@ -417,8 +417,9 @@ public class WTGVisualizationClient implements GUIAnalysisClient {
     
     private String generateJSONSummary(WTG wtg) {
         String jsonFilePath = null;
+        long startTime = System.currentTimeMillis();
         try {
-            // Create output directory structure: output/app_name/results/
+            // Create output directory structure: output/app_name/
             String baseDir = new File(".").getCanonicalPath();
             // Navigate to project root
             if (baseDir.endsWith("viz-demo")) {
@@ -433,10 +434,10 @@ public class WTGVisualizationClient implements GUIAnalysisClient {
                     baseDir = new File(baseDir).getParentFile().getCanonicalPath();
                 }
             }
-            String outputDir = baseDir + "/output/" + Configs.benchmarkName + "/results";
+            String outputDir = baseDir + "/output/" + Configs.benchmarkName;
             new File(outputDir).mkdirs();
             
-            jsonFilePath = outputDir + "/" + Configs.benchmarkName + "_analysis.json";
+            jsonFilePath = outputDir + "/utg.json";
             FileWriter output = new FileWriter(jsonFilePath);
             BufferedWriter writer = new BufferedWriter(output);
             
@@ -492,10 +493,15 @@ public class WTGVisualizationClient implements GUIAnalysisClient {
                 }
             }
             
+            // Calculate analysis duration
+            long endTime = System.currentTimeMillis();
+            double durationSeconds = (endTime - startTime) / 1000.0;
+            
             // Build JSON
             writer.write("{\n");
             writer.write("  \"application\": \"" + escapeJSON(Configs.benchmarkName) + "\",\n");
             writer.write("  \"analysis_time\": \"" + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date()) + "\",\n");
+            writer.write("  \"analysis_duration_seconds\": " + String.format("%.3f", durationSeconds) + ",\n");
             writer.write("  \"summary\": {\n");
             writer.write("    \"total_nodes\": " + nodes.size() + ",\n");
             writer.write("    \"total_edges\": " + edges.size() + ",\n");
@@ -572,7 +578,7 @@ public class WTGVisualizationClient implements GUIAnalysisClient {
             writer.write("}\n");
             writer.close();
             
-            Logger.verb("WTG_VIZ", "JSON summary generated: " + jsonFilePath);
+            Logger.verb("WTG_VIZ", "UTG JSON generated: " + jsonFilePath);
             
         } catch (IOException e) {
             e.printStackTrace();

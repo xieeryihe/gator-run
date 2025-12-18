@@ -2,8 +2,38 @@ import os, sys
 import json, subprocess, glob
 import tempfile, shutil
 import threading
+import re
+import time
+from datetime import datetime
 
 GLOBAL_DECODE_LOCK = threading.Lock()
+
+# ========== Configuration ==========
+# You can modify these default values or use a config file
+DEFAULT_CONFIG = {
+    "gator_root": r"C:\Code\experiment\Gator",
+    "adk_root": r"D:\AndroidSDK",
+    "java_memory": "12G",
+    "apktool_jar": "apktool_2.9.1.jar"
+}
+
+def loadConfig():
+    """Load configuration from config file or use defaults"""
+    configPath = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "gator_config.json")
+    if os.path.exists(configPath):
+        try:
+            with open(configPath, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                print(f"[OK] Loaded config from: {configPath}")
+                return config
+        except Exception as e:
+            print(f"[WARN] Failed to load config file ({e}), using defaults")
+    else:
+        print(f"[INFO] Config file not found at {configPath}, using defaults")
+    return DEFAULT_CONFIG
+
+CONFIG = loadConfig()
+# ===================================
 
 class GlobalConfigs:
     def __init__(self):
@@ -21,15 +51,8 @@ def fatalError(str):
 
 def extractLibsFromPath(pathName):
     if not pathExists(pathName):
-        return ""
-        pass
-    fileList = glob.glob(pathName+"/*.jar")
-    if len(fileList) == 0:
-        return ""
-    ret = ""
-    for item in fileList:
-        ret += ':' + item
-    return ret;
+        return []
+    return glob.glob(os.path.join(pathName, "*.jar"))
 
 def pathExists(pathName):
     if os.access(pathName, os.F_OK):
@@ -50,7 +73,7 @@ def invokeGatorOnAPK(\
                 timeout = 0
                 ):
     ''''''
-    SootAndroidLocation = configs.GATOR_ROOT + "/SootAndroid"
+    SootAndroidLocation = os.path.join(configs.GATOR_ROOT, "SootAndroid")
     bGoogleAPI = False
     if len(apiLevel) > 6:
         if apiLevel[:6] == "google":
@@ -61,27 +84,40 @@ def invokeGatorOnAPK(\
     except:
         fatalError("FATALERROR: API Level not valid")
     if (bGoogleAPI):
-        GoogleAPIDir = sdkLocation + \
-            "/add-ons/addon-google_apis-google-" + sLevelNum
+        GoogleAPIDir = os.path.join(sdkLocation, "add-ons", "addon-google_apis-google-" + sLevelNum)
         if not pathExists(GoogleAPIDir) :
             print("Google API Level:" + sLevelNum + "Not installed!")
             sys.exit(-1);
-        GoogleAPI = "{0}/libs/maps.jar:{0}/libs/usb.jar:{0}/libs/effects.jar".format(GoogleAPIDir)
-    PlatformAPIDir = sdkLocation + \
-            "/platforms/" + "android-" + str(iLevelNum)
-    ClassPathJar = extractLibsFromPath("{0}/lib".format(SootAndroidLocation));
-    ClassPathJar = ":{0}/bin".format(SootAndroidLocation) + ClassPathJar
-    PlatformJar = "{0}/platforms/android-".format(sdkLocation) + sLevelNum +"/android.jar"
-    PlatformJar+=":" + "{0}/deps/android-support-annotations.jar:{0}/deps/android-support-v4.jar:{0}/deps/android-support-v7-appcompat.jar:{0}/deps/android-support-v7-cardview.jar:{0}/deps/android-support-v7-gridlayout.jar:{0}/deps/android-support-v7-mediarouter.jar:{0}/deps/android-support-v7-palette.jar:{0}/deps/android-support-v7-preference.jar::{0}/deps/android-support-v7-recyclerview.jar".format(SootAndroidLocation)
+        GoogleAPI = os.pathsep.join([
+            os.path.join(GoogleAPIDir, "libs", "maps.jar"),
+            os.path.join(GoogleAPIDir, "libs", "usb.jar"),
+            os.path.join(GoogleAPIDir, "libs", "effects.jar")])
+    classPathEntries = [os.path.join(SootAndroidLocation, "bin")]
+    classPathEntries.extend(extractLibsFromPath(os.path.join(SootAndroidLocation, "lib")))
+    ClassPathJar = os.pathsep.join(classPathEntries)
+    platformJarEntries = [os.path.join(sdkLocation, "platforms", "android-" + sLevelNum, "android.jar")]
+    supportLibs = [
+        "android-support-annotations.jar",
+        "android-support-v4.jar",
+        "android-support-v7-appcompat.jar",
+        "android-support-v7-cardview.jar",
+        "android-support-v7-gridlayout.jar",
+        "android-support-v7-mediarouter.jar",
+        "android-support-v7-palette.jar",
+        "android-support-v7-preference.jar",
+        "android-support-v7-recyclerview.jar"
+    ]
+    platformJarEntries.extend([os.path.join(SootAndroidLocation, "deps", lib) for lib in supportLibs])
     if iLevelNum >= 23:
         #include the apache library
-        apacheLib = "{0}/platforms/android-".format(sdkLocation) + sLevelNum +"/optional/org.apache.http.legacy.jar"
+        apacheLib = os.path.join(sdkLocation, "platforms", "android-" + sLevelNum, "optional", "org.apache.http.legacy.jar")
         if pathExists(apacheLib):
-            PlatformJar += ":" + apacheLib
+            platformJarEntries.append(apacheLib)
+    PlatformJar = os.pathsep.join(platformJarEntries)
     #Finished computing platform libraries
     callList = [\
                 'java', \
-                '-Xmx12G', \
+                f'-Xmx{CONFIG["java_memory"]}', \
                 '-classpath', ClassPathJar, \
                 'presto.android.Main', \
                 '-project', apkPath,\
@@ -93,15 +129,20 @@ def invokeGatorOnAPK(\
                 '-apiLevel', "android-" + sLevelNum,\
                 '-benchmarkName', benchmarkName,\
                 '-guiAnalysis',
-                '-listenerSpecFile', SootAndroidLocation + "/listeners.xml",
-                '-wtgSpecFile', SootAndroidLocation + '/wtg.xml']
+                '-listenerSpecFile', os.path.join(SootAndroidLocation, "listeners.xml"),
+                '-wtgSpecFile', os.path.join(SootAndroidLocation, 'wtg.xml')]
     callList.extend(options);
     #print(callList)
+    
+    # Set up environment with GatorRoot
+    env = os.environ.copy()
+    env['GatorRoot'] = configs.GATOR_ROOT
+    
     if timeout == 0:
-        return subprocess.call(callList, stdout = output, stderr = output)
+        return subprocess.call(callList, stdout = output, stderr = output, env = env)
     else:
        try:
-         retval = subprocess.call(callList, stdout = output, stderr = output, timeout = timeout)
+         retval = subprocess.call(callList, stdout = output, stderr = output, timeout = timeout, env = env)
          return retval
        except subprocess.TimeoutExpired:
          return -50
@@ -112,7 +153,7 @@ def decodeAPK(apkPath, decodeLocation, output = None):
     GLOBAL_DECODE_LOCK.acquire()
     callList = ['java',\
                 '-jar',\
-                "apktool.jar",\
+                CONFIG["apktool_jar"],\
                 'd', apkPath,\
                 '-o', decodeLocation, \
                 '-f']
@@ -142,8 +183,9 @@ def parseMainParam():
 
 def determinAPILevel(dirName, configs):
     targetLevel = 0;
-    if pathExists(dirName + "/apktool.yml"):
-        infoFile = open(dirName + "/apktool.yml", 'r')
+    apktoolFile = os.path.join(dirName, "apktool.yml")
+    if pathExists(apktoolFile):
+        infoFile = open(apktoolFile, 'r')
         lines = infoFile.readlines()
         infoFile.close()
         for i in range(len(lines)):
@@ -153,135 +195,180 @@ def determinAPILevel(dirName, configs):
                 minLevel = extractAPILevelFromLine(lines[i])
                 if minLevel > targetLevel:
                     targetLevel = minLevel
-                    pass
-                pass
-            pass
         if (targetLevel != 0):
-            if pathExists(configs.ADK_ROOT + "platforms/android-" + str(targetLevel)):
-              return targetLevel
+            adkPlatform = os.path.join(configs.ADK_ROOT, "platforms", "android-" + str(targetLevel))
+            if pathExists(adkPlatform):
+                return targetLevel
             else:
-              return 23
+                return 23
         else:
             return 23
     else:
         return 23
 
 def extractAPILevelFromLine(curLine):
-    i = curLine.find("'")
-    curLine = curLine[i+1:]
-    i = curLine.find("'")
-    curLine = curLine[:i]
-    numLevel = int(curLine)
-    return numLevel
+    match = re.search(r"(\d+)", curLine)
+    if not match:
+        fatalError("Unable to parse API level from apktool.yml")
+    return int(match.group(1))
 
 def determinGatorRootAndSDKPath(configs):
-    gatorRoot = os.environ.get("GatorRoot")
+    # Determine Gator Root
+    gatorRoot = os.environ.get("GatorRoot") or os.environ.get("GATOR_ROOT")
     if gatorRoot != None:
-        configs.GATOR_ROOT = gatorRoot
+        configs.GATOR_ROOT = os.path.normpath(gatorRoot)
+        print(f"[OK] Using GatorRoot from environment: {configs.GATOR_ROOT}")
     else:
-        curPath = os.getcwd()
-        curPathNames = curPath.split('/')
-        lastDirName = "";
-        for i in reversed(range(len(curPathNames))):
-            if curPathNames[i] != '':
-                lastDirName = curPathNames[i]
-                break
-            pass
-        if lastDirName == "AndroidBench":
+        # Try to detect from current directory
+        curPath = os.path.abspath(os.getcwd())
+        if os.path.basename(curPath) == "AndroidBench":
             configs.GATOR_ROOT = getParentDir(curPath)
+            print(f"[OK] Detected GatorRoot from current directory: {configs.GATOR_ROOT}")
+        elif "gator_root" in CONFIG and pathExists(CONFIG["gator_root"]):
+            configs.GATOR_ROOT = os.path.normpath(CONFIG["gator_root"])
+            print(f"[OK] Using GatorRoot from config: {configs.GATOR_ROOT}")
         else:
-            fatalError("GatorRoot environment variable is not defined")
+            print(f"[ERROR] Cannot determine GatorRoot!")
+            print(f"  - Environment variable not set")
+            print(f"  - Current directory: {curPath}")
+            print(f"  - Config gator_root: {CONFIG.get('gator_root', 'NOT SET')}")
+            if "gator_root" in CONFIG:
+                print(f"  - Config path exists: {pathExists(CONFIG['gator_root'])}")
+            fatalError("GatorRoot path not found. Please set environment variable or update config file.")
+    
+    # Determine ADK Root
     adkRoot = os.environ.get("ADK")
     if adkRoot != None:
-        configs.ADK_ROOT = adkRoot
+        configs.ADK_ROOT = os.path.normpath(adkRoot)
+        print(f"[OK] Using ADK from environment: {configs.ADK_ROOT}")
+    elif "adk_root" in CONFIG and pathExists(CONFIG["adk_root"]):
+        configs.ADK_ROOT = os.path.normpath(CONFIG["adk_root"])
+        print(f"[OK] Using ADK from config: {configs.ADK_ROOT}")
     else:
         homeDir = os.environ.get("HOME")
-        if homeDir == None:
-            fatalError("ADK environment variable is not defined")
-        if sys.platform == "linux2":
-            if pathExists(homeDir + "/Android/Sdk"):
-                configs.ADK_ROOT = homeDir+"/Android/Sdk"
-            else:
-                fatalError("ADK environment variable is not defined")
-        elif sys.platform == "darwin":
-            if pathExists(homeDir + "/Library/Android/sdk"):
-                configs.ADK_ROOT = homeDir + "/Library/Android/sdk"
-            else:
-                fatalError("ADK environment variable is not defined")
-        pass
-    pass
+        if homeDir != None:
+            if sys.platform == "linux2":
+                candidate = os.path.join(homeDir, "Android", "Sdk")
+                if pathExists(candidate):
+                    configs.ADK_ROOT = candidate
+                    print(f"[OK] Found ADK at: {configs.ADK_ROOT}")
+                    return
+            elif sys.platform == "darwin":
+                candidate = os.path.join(homeDir, "Library", "Android", "sdk")
+                if pathExists(candidate):
+                    configs.ADK_ROOT = candidate
+                    print(f"[OK] Found ADK at: {configs.ADK_ROOT}")
+                    return
+        
+        print(f"[ERROR] Cannot determine ADK path!")
+        print(f"  - Environment variable ADK not set")
+        print(f"  - Config adk_root: {CONFIG.get('adk_root', 'NOT SET')}")
+        if "adk_root" in CONFIG:
+            print(f"  - Config path exists: {pathExists(CONFIG['adk_root'])}")
+        fatalError("ADK path not found. Please set environment variable or update config file.")
 
 def getParentDir(pathName):
-    pathName = pathName.strip()
-    if pathName[-1] == '/':
-        pathName = pathName[:len(pathName) - 1]
-    index = 0
-    for i in reversed(range(len(pathName))):
-        if pathName[i] == '/':
-            index = i
-            break
-            pass
-    if index != 0:
-        return pathName[:index]
-    else:
-        fatalError("GatorRoot environment variable not defined")
-    pass
+    normalized = os.path.normpath(pathName.strip())
+    parent = os.path.dirname(normalized)
+    if parent and parent != normalized:
+        return parent
+    fatalError(f"Cannot determine parent directory of: {pathName}")
 
 def runGatorOnAPKDirect(apkFileName, GatorOptions, keepdecodedDir, output = None, configs = None, timeout = 0):
+    # Record start time
+    start_time = time.time()
+    
     if configs == None:
       configs = GlobalConfigs()
     if configs.GATOR_ROOT == "" or configs.ADK_ROOT == "":
         determinGatorRootAndSDKPath(configs)
     
     # Extract app name from apk file
-    pathElements = apkFileName.split("/")
-    apkBaseName = pathElements[-1]
+    apkBaseName = os.path.basename(apkFileName)
     appName = apkBaseName.replace(".apk", "").replace(".zip", "")
     
-    # Create output directory structure: output/app_name/
-    outputBaseDir = os.path.join(configs.GATOR_ROOT, "output", appName)
-    decodeDir = os.path.join(outputBaseDir, "source")
+    # Create output directory with timestamp: output/task_2025-12-17_15-07-23/
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    taskName = f"task_{timestamp}"
+    outputBaseDir = os.path.normpath(os.path.join(configs.GATOR_ROOT, "output", taskName))
+    
+    # Use temp directory for decoded APK (will always be deleted)
+    tempDir = tempfile.mkdtemp(prefix="gator_decode_")
+    decodeDir = os.path.normpath(os.path.join(tempDir, "source"))
     os.makedirs(decodeDir, exist_ok=True)
+    os.makedirs(outputBaseDir, exist_ok=True)
     
     if output == None:
-      print("Extract APK to: " + decodeDir)
-      print("Results will be saved to: " + os.path.join(outputBaseDir, "results"))
+      print("Extract APK to temporary directory: " + decodeDir)
+      print("Results will be saved to: " + outputBaseDir)
     else:
-      output.write("Extract APK to: " + decodeDir + "\n")
-      output.write("Results will be saved to: " + os.path.join(outputBaseDir, "results") + "\n")
+      output.write("Extract APK to temporary directory: " + decodeDir + "\n")
+      output.write("Results will be saved to: " + outputBaseDir + "\n")
     
     configs.KEEP_DECODE = keepdecodedDir
     configs.APK_NAME = apkFileName
     configs.GATOR_OPTIONS = GatorOptions
+    
+    # Ensure WTGVisualizationClient is used if no client is specified
+    has_client = any('-client' in opt for opt in configs.GATOR_OPTIONS)
+    if not has_client:
+        configs.GATOR_OPTIONS.extend(['-client', 'WTGVisualizationClient'])
+        if output == None:
+            print("[INFO] Using default client: WTGVisualizationClient")
+        else:
+            output.write("[INFO] Using default client: WTGVisualizationClient\n")
 
     decodeAPK(configs.APK_NAME, decodeDir, output = output)
     numAPILevel = determinAPILevel(decodeDir, configs)
 
     manifestPath = decodeDir + "/AndroidManifest.xml"
     resPath = decodeDir + "/res"
+    
+    # Record Gator execution start
+    gator_start = time.time()
     retval = invokeGatorOnAPK(\
                 apkPath = configs.APK_NAME,\
                 resPath = resPath, \
                 manifestPath = manifestPath,\
                 apiLevel = "android-{0}".format(numAPILevel), \
                 sdkLocation = configs.ADK_ROOT, \
-                benchmarkName = appName,\
+                benchmarkName = taskName,\
                 options = configs.GATOR_OPTIONS,
                 configs = configs,
                 output = output,
                 timeout = timeout)
+    gator_end = time.time()
 
-    if not configs.KEEP_DECODE:
-        shutil.rmtree(decodeDir)
+    # Always clean up temporary decoded APK directory
+    try:
+        shutil.rmtree(tempDir)
         if output == None:
-          print("Extracted APK resources removed!")
+          print("Temporary APK resources removed!")
         else:
-          output.write("Extracted APK resources removed!")
+          output.write("Temporary APK resources removed!\n")
+    except Exception as e:
+        if output == None:
+          print(f"Warning: Failed to remove temporary directory: {e}")
+        else:
+          output.write(f"Warning: Failed to remove temporary directory: {e}\n")
+    
+    # Calculate execution time
+    end_time = time.time()
+    total_time = end_time - start_time
+    gator_time = gator_end - gator_start
+    
+    # Print timing information
+    if output == None:
+        print(f"\n[SUCCESS] Analysis complete!")
+        print(f"[TIMING] Total execution time: {total_time:.2f}s")
+        print(f"[TIMING] Gator analysis time: {gator_time:.2f}s")
+        print(f"[OUTPUT] Results directory: {outputBaseDir}")
     else:
-        if output == None:
-          print("Source code preserved at: " + decodeDir)
-        else:
-          output.write("Source code preserved at: " + decodeDir + "\n")
+        output.write(f"\n[SUCCESS] Analysis complete!\n")
+        output.write(f"[TIMING] Total execution time: {total_time:.2f}s\n")
+        output.write(f"[TIMING] Gator analysis time: {gator_time:.2f}s\n")
+        output.write(f"[OUTPUT] Results directory: {outputBaseDir}\n")
+    
     return retval
 
 def main():
