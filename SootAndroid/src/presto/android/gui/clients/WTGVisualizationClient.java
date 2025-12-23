@@ -37,27 +37,38 @@ public class WTGVisualizationClient implements GUIAnalysisClient {
         Logger.verb("WTG_VIZ", "=== Starting WTG Visualization ===");
         
         // Build the WTG
+        Logger.verb("WTG_VIZ", "Building WTG...");
         WTGBuilder wtgBuilder = new WTGBuilder();
         wtgBuilder.build(output);
         WTGAnalysisOutput wtgAO = new WTGAnalysisOutput(output, wtgBuilder);
         WTG wtg = wtgAO.getWTG();
+        Logger.verb("WTG_VIZ", "WTG built successfully");
         
         // Print WTG statistics
         printWTGStatistics(wtg);
         
+        // Generate JSON summary FIRST (before any other output)
+        // This ensures JSON data is saved even if later stages hang
+        Logger.verb("WTG_VIZ", "Saving JSON summary...");
+        String jsonFile = generateJSONSummary(wtg);
+        if (jsonFile != null) {
+            Logger.verb("WTG_VIZ", "JSON summary saved: " + jsonFile);
+        } else {
+            Logger.err("WTG_VIZ", "Failed to save JSON summary");
+        }
+        
         // Generate DOT file
+        Logger.verb("WTG_VIZ", "Generating DOT file...");
         String dotFile = generateDotFile(wtg);
         
         // Generate HTML viewer
+        Logger.verb("WTG_VIZ", "Generating HTML viewer...");
         String htmlFile = generateHTMLViewer(wtg, dotFile);
         
-        // Generate JSON summary
-        String jsonFile = generateJSONSummary(wtg);
-        
         Logger.verb("WTG_VIZ", "=== Visualization Complete ===");
+        Logger.verb("WTG_VIZ", "JSON summary: " + jsonFile);
         Logger.verb("WTG_VIZ", "DOT file: " + dotFile);
         Logger.verb("WTG_VIZ", "HTML viewer: " + htmlFile);
-        Logger.verb("WTG_VIZ", "JSON summary: " + jsonFile);
         Logger.verb("WTG_VIZ", "");
         Logger.verb("WTG_VIZ", "To view the graph:");
         Logger.verb("WTG_VIZ", "  1. Open " + htmlFile + " in a web browser");
@@ -417,7 +428,6 @@ public class WTGVisualizationClient implements GUIAnalysisClient {
     
     private String generateJSONSummary(WTG wtg) {
         String jsonFilePath = null;
-        long startTime = System.currentTimeMillis();
         try {
             // Create output directory structure: output/app_name/
             String baseDir = new File(".").getCanonicalPath();
@@ -437,7 +447,7 @@ public class WTGVisualizationClient implements GUIAnalysisClient {
             String outputDir = baseDir + "/output/" + Configs.benchmarkName;
             new File(outputDir).mkdirs();
             
-            jsonFilePath = outputDir + "/utg.json";
+            jsonFilePath = outputDir + "/wtg.json";
             FileWriter output = new FileWriter(jsonFilePath);
             BufferedWriter writer = new BufferedWriter(output);
             
@@ -493,15 +503,9 @@ public class WTGVisualizationClient implements GUIAnalysisClient {
                 }
             }
             
-            // Calculate analysis duration
-            long endTime = System.currentTimeMillis();
-            double durationSeconds = (endTime - startTime) / 1000.0;
-            
-            // Build JSON
+            // Build JSON (timing information will be added by Python code)
             writer.write("{\n");
             writer.write("  \"application\": \"" + escapeJSON(Configs.benchmarkName) + "\",\n");
-            writer.write("  \"analysis_time\": \"" + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date()) + "\",\n");
-            writer.write("  \"analysis_duration_seconds\": " + String.format("%.3f", durationSeconds) + ",\n");
             writer.write("  \"summary\": {\n");
             writer.write("    \"total_nodes\": " + nodes.size() + ",\n");
             writer.write("    \"total_edges\": " + edges.size() + ",\n");
@@ -576,7 +580,11 @@ public class WTGVisualizationClient implements GUIAnalysisClient {
             writer.write("  ]\n");
             
             writer.write("}\n");
+            
+            // Ensure data is written to disk immediately
+            writer.flush();
             writer.close();
+            output.close();
             
             Logger.verb("WTG_VIZ", "UTG JSON generated: " + jsonFilePath);
             

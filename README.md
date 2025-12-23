@@ -1,3 +1,12 @@
+直接用带apk的分析
+python runGatorOnApk.py
+
+apk目录等相关配置查看
+AndroidBench\config\gator_config.json
+
+
+---
+
 一键执行：
 
 python runGator.py -j apv/config.json -p apv
@@ -27,23 +36,6 @@ Static Control-Flow Analysis of User-Driven Callbacks in Android Applications（
 
 # WTG 可视化分析 - 完整指南
 
-## 📦 输出目录结构
-
-所有输出统一在 `output/` 目录下，按应用名称组织：
-
-```
-output/
-└── app_name/              # 应用名称（如 apv）
-    ├── source/            # APK 解压源码（需要 --keep-decoded-apk-dir）
-    │   ├── AndroidManifest.xml
-    │   ├── res/           # 资源文件
-    │   └── smali/         # 反编译代码
-    └── results/           # 分析结果
-        ├── app_name_wtg_viewer.html    # HTML 查看器
-        ├── app_name_wtg.dot            # DOT 图形文件
-        └── app_name_analysis.json      # JSON 分析报告
-```
-
 ---
 
 ## 🚀 快速开始
@@ -59,7 +51,7 @@ python visualize_apv.py        # 跨平台
 python runGator.py -j apv/config.json -p apv
 
 # 查看结果（自动在浏览器打开）
-# output/apv/results/apv_wtg_viewer.html
+# output/apv/results/apv_utg.html
 ```
 
 ---
@@ -68,7 +60,7 @@ python runGator.py -j apv/config.json -p apv
 
 ### 1. HTML 查看器（推荐）
 
-打开 `output/apv/results/apv_wtg_viewer.html`，包含 4 个标签页：
+打开 `output/apv/results/apv_utg.html`，包含 4 个标签页：
 - **Overview** - 使用说明
 - **Nodes** - 窗口节点详情
 - **Edges** - 转换边详情
@@ -111,8 +103,8 @@ python runGator.py -j apv/config.json -p apv
 
 ```bash
 cd output/apv/results
-dot -Tpng apv_wtg.dot -o apv_wtg.png      # PNG 格式
-dot -Tsvg apv_wtg.dot -o apv_wtg.svg      # SVG 格式
+dot -Tpng apv_utg.dot -o apv_wtg.png      # PNG 格式
+dot -Tsvg apv_utg.dot -o apv_wtg.svg      # SVG 格式
 ```
 
 ---
@@ -206,20 +198,11 @@ for (WTGEdge edge : wtg.getEdges()) {
 
 ---
 
-## 📝 主要改进总结
-
-### ✅ 统一输出路径
-- **修改前**：输出文件散落在各个目录，源码用后删除
-- **修改后**：统一到 `output/app_name/` 目录，源码和结果分离
-
 ### ✅ 三种输出格式
 - **HTML** - 交互式查看器，支持 4 个标签页
 - **DOT** - Graphviz 图形定义，兼容可视化工具
 - **JSON** - 结构化数据，支持程序化访问
 
-### ✅ 文档精简
-- 整合 5 个文档为 1 个统一指南
-- 清晰的快速开始和使用说明
 
 ### ✅ 自动化脚本
 - Windows 批处理文件（`visualize_apv.bat`）
@@ -238,30 +221,9 @@ for (WTGEdge edge : wtg.getEdges()) {
 | `AndroidBench/runGator.py` | 通用分析脚本 |
 | `AndroidBench/runGatorOnApk.py` | APK 分析脚本 |
 
----
 
-## 🎯 应用场景
-
-- **测试生成** - 基于 WTG 路径生成测试用例
-- **UI 分析** - 理解应用导航结构
-- **漏洞检测** - 发现不安全的窗口转换
-- **逆向工程** - 分析应用行为和流程
-- **自动化分析** - 通过 JSON 数据批量处理
-
----
-
-## 🔍 故障排查
-
-### 找不到输出文件？
-检查 `output/app_name/results/` 目录
-
-### 想保留 APK 源码？
+保留 APK 源码？
 使用 `--keep-decoded-apk-dir` 参数
-
-### 图形无法显示？
-1. 检查 DOT 文件是否存在
-2. 尝试在线工具：https://dreampuf.github.io/GraphvizOnline/
-3. 安装 Graphviz：`choco install graphviz`（Windows）
 
 ### 编译错误？
 ```bash
@@ -269,14 +231,3 @@ cd SootAndroid
 ant compile
 ```
 
----
-
-## 📖 更多资源
-
-- **Gator 项目**: https://github.com/secure-software-engineering/gator
-- **Graphviz 文档**: https://graphviz.org/documentation/
-- **在线可视化**: https://dreampuf.github.io/GraphvizOnline/
-
----
-
-**祝你分析愉快！** 🎉

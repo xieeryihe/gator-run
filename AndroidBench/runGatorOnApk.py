@@ -14,7 +14,9 @@ DEFAULT_CONFIG = {
     "gator_root": r"C:\Code\experiment\Gator",
     "adk_root": r"D:\AndroidSDK",
     "java_memory": "12G",
-    "apktool_jar": "apktool_2.9.1.jar"
+    "apktool_jar": "apktool_2.9.1.jar",
+    "apk_directory": r"C:\Code\experiment\Gator\AndroidBench\apk",
+    "analysis_timeout": 600  # 10 minutes default timeout
 }
 
 def loadConfig():
@@ -141,11 +143,43 @@ def invokeGatorOnAPK(\
     if timeout == 0:
         return subprocess.call(callList, stdout = output, stderr = output, env = env)
     else:
-       try:
-         retval = subprocess.call(callList, stdout = output, stderr = output, timeout = timeout, env = env)
-         return retval
-       except subprocess.TimeoutExpired:
-         return -50
+        # Use Popen for better timeout control and forced termination
+        try:
+            process = subprocess.Popen(
+                callList,
+                stdout=output,
+                stderr=output,
+                env=env
+            )
+            retval = process.wait(timeout=timeout)
+            return retval
+        except subprocess.TimeoutExpired:
+            # Try graceful termination first to allow Java to save data
+            if output:
+                output.write(f"\n[WARNING] Analysis timeout after {timeout}s, attempting graceful shutdown...\n")
+                output.flush()
+            
+            process.terminate()  # Send SIGTERM (graceful)
+            try:
+                retval = process.wait(timeout=10)  # Wait 10 seconds for graceful exit
+                if output:
+                    output.write(f"[INFO] Process terminated gracefully\n")
+                    output.flush()
+                return retval
+            except subprocess.TimeoutExpired:
+                # Force kill if graceful termination fails
+                if output:
+                    output.write(f"[ERROR] Graceful termination failed, force killing process\n")
+                    output.flush()
+                process.kill()
+                process.wait()
+            
+            if output:
+                try:
+                    os.fsync(output.fileno())  # Force write to disk
+                except:
+                    pass
+            return -50
     pass
 
 def decodeAPK(apkPath, decodeLocation, output = None):
@@ -274,7 +308,7 @@ def getParentDir(pathName):
         return parent
     fatalError(f"Cannot determine parent directory of: {pathName}")
 
-def runGatorOnAPKDirect(apkFileName, GatorOptions, keepdecodedDir, output = None, configs = None, timeout = 0):
+def runGatorOnAPKDirect(apkFileName, GatorOptions, keepdecodedDir, output = None, configs = None, timeout = 0, taskName = None):
     # Record start time
     start_time = time.time()
     
@@ -287,10 +321,11 @@ def runGatorOnAPKDirect(apkFileName, GatorOptions, keepdecodedDir, output = None
     apkBaseName = os.path.basename(apkFileName)
     appName = apkBaseName.replace(".apk", "").replace(".zip", "")
     
-    # Create output directory with timestamp: output/task_2025-12-17_15-07-23/
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    taskName = f"task_{timestamp}"
-    outputBaseDir = os.path.normpath(os.path.join(configs.GATOR_ROOT, "output", taskName))
+    # Create output directory with timestamp and app name: output/task_2025-12-18_21-22-01/Calendar/
+    if taskName is None:
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        taskName = f"task_{timestamp}"
+    outputBaseDir = os.path.normpath(os.path.join(configs.GATOR_ROOT, "output", taskName, appName))
     
     # Use temp directory for decoded APK (will always be deleted)
     tempDir = tempfile.mkdtemp(prefix="gator_decode_")
@@ -332,12 +367,53 @@ def runGatorOnAPKDirect(apkFileName, GatorOptions, keepdecodedDir, output = None
                 manifestPath = manifestPath,\
                 apiLevel = "android-{0}".format(numAPILevel), \
                 sdkLocation = configs.ADK_ROOT, \
-                benchmarkName = taskName,\
+                benchmarkName = f"{taskName}/{appName}",\
                 options = configs.GATOR_OPTIONS,
                 configs = configs,
                 output = output,
                 timeout = timeout)
     gator_end = time.time()
+    
+    # Ensure all output is flushed to disk before continuing
+    if output:
+        output.flush()
+        os.fsync(output.fileno())  # Force write to disk
+    
+    # Small delay to ensure file system operations complete
+    time.sleep(0.5)
+    
+    # Calculate execution time here before updating JSON
+    end_time = time.time()
+    total_time = end_time - start_time
+    gator_time = gator_end - gator_start
+
+    # Add timing information to the generated wtg.json file and reorganize
+    wtg_json_path = os.path.join(outputBaseDir, "wtg.json")
+    if os.path.exists(wtg_json_path):
+        try:
+            with open(wtg_json_path, 'r', encoding='utf-8') as f:
+                wtg_data = json.load(f)
+            
+            # Create new ordered dict with timing info at the beginning
+            ordered_data = {
+                'analysis_time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                'analysis_duration_seconds': round(total_time, 3)
+            }
+            # Add rest of the data
+            for key, value in wtg_data.items():
+                ordered_data[key] = value
+            
+            # Write reorganized JSON back
+            with open(wtg_json_path, 'w', encoding='utf-8') as f:
+                json.dump(ordered_data, f, indent=2, ensure_ascii=False)
+            
+            if output:
+                output.write(f"[INFO] Added timing information to wtg.json: {total_time:.3f}s\n")
+        except Exception as e:
+            if output:
+                output.write(f"[WARNING] Failed to add timing information to wtg.json: {e}\n")
+            else:
+                print(f"[WARNING] Failed to add timing information to wtg.json: {e}")
 
     # Always clean up temporary decoded APK directory
     try:
@@ -352,12 +428,7 @@ def runGatorOnAPKDirect(apkFileName, GatorOptions, keepdecodedDir, output = None
         else:
           output.write(f"Warning: Failed to remove temporary directory: {e}\n")
     
-    # Calculate execution time
-    end_time = time.time()
-    total_time = end_time - start_time
-    gator_time = gator_end - gator_start
-    
-    # Print timing information
+    # Print timing information (time already calculated above)
     if output == None:
         print(f"\n[SUCCESS] Analysis complete!")
         print(f"[TIMING] Total execution time: {total_time:.2f}s")
@@ -371,8 +442,102 @@ def runGatorOnAPKDirect(apkFileName, GatorOptions, keepdecodedDir, output = None
     
     return retval
 
+def runGatorOnAllAPKsInDirectory(apkDirectory, GatorOptions, keepdecodedDir, configs=None, timeout=None):
+    """Run Gator analysis on all APK files in the specified directory"""
+    if configs is None:
+        configs = GlobalConfigs()
+    
+    if configs.GATOR_ROOT == "" or configs.ADK_ROOT == "":
+        determinGatorRootAndSDKPath(configs)
+    
+    # Use timeout from config if not specified
+    if timeout is None:
+        timeout = CONFIG.get("analysis_timeout", 600)
+    
+    print(f"[INFO] Analysis timeout: {timeout}s ({timeout//60} minutes)")
+    
+    # Find all APK files in the directory
+    if not pathExists(apkDirectory):
+        print(f"[ERROR] APK directory not found: {apkDirectory}")
+        return -1
+    
+    apkFiles = glob.glob(os.path.join(apkDirectory, "*.apk"))
+    if not apkFiles:
+        print(f"[WARNING] No APK files found in: {apkDirectory}")
+        return 0
+    
+    # Create a single timestamp for all APKs in this batch
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    taskName = f"task_{timestamp}"
+    
+    print(f"\n[INFO] Found {len(apkFiles)} APK file(s) in {apkDirectory}")
+    print(f"[INFO] Batch task: {taskName}")
+    print(f"[INFO] Starting batch analysis...\n")
+    
+    results = []
+    for idx, apkPath in enumerate(apkFiles, 1):
+        apkName = os.path.basename(apkPath)
+        print(f"\n{'='*60}")
+        print(f"[{idx}/{len(apkFiles)}] Processing: {apkName}")
+        print(f"{'='*60}\n")
+        
+        # Create log file for each APK
+        appName = apkName.replace(".apk", "").replace(".zip", "")
+        logDir = os.path.join(configs.GATOR_ROOT, "output", taskName, appName)
+        os.makedirs(logDir, exist_ok=True)
+        logPath = os.path.join(logDir, "log.txt")
+        
+        with open(logPath, 'w', encoding='utf-8') as logFile:
+            retval = runGatorOnAPKDirect(
+                apkPath, 
+                GatorOptions, 
+                keepdecodedDir, 
+                output=logFile, 
+                configs=configs,
+                timeout=timeout,
+                taskName=taskName
+            )
+            results.append((apkName, retval))
+        
+        if retval == 0:
+            print(f"[✓] {apkName} - SUCCESS")
+        elif retval == -50:
+            print(f"[✗] {apkName} - TIMEOUT")
+        else:
+            print(f"[✗] {apkName} - FAILED (exit code: {retval})")
+    
+    # Print summary
+    print(f"\n{'='*60}")
+    print("BATCH ANALYSIS SUMMARY")
+    print(f"{'='*60}")
+    success_count = sum(1 for _, ret in results if ret == 0)
+    print(f"Total: {len(results)} | Success: {success_count} | Failed: {len(results) - success_count}")
+    for apkName, retval in results:
+        status = "SUCCESS" if retval == 0 else ("TIMEOUT" if retval == -50 else f"FAILED({retval})")
+        print(f"  - {apkName}: {status}")
+    print(f"{'='*60}\n")
+    
+    return 0 if success_count == len(results) else 1
+
 def main():
     configs = parseMainParam();
+    
+    # If no APK specified, try to use APK directory from config
+    if configs.APK_NAME == "":
+        if "apk_directory" in CONFIG and pathExists(CONFIG["apk_directory"]):
+            print(f"[INFO] No APK specified, using directory from config: {CONFIG['apk_directory']}")
+            return runGatorOnAllAPKsInDirectory(
+                CONFIG["apk_directory"],
+                configs.GATOR_OPTIONS,
+                configs.KEEP_DECODE,
+                configs=configs
+            )
+        else:
+            print("[ERROR] No APK file specified and no valid apk_directory in config")
+            print("Usage: python runGatorOnApk.py <path_to_apk> [options]")
+            print("   or: Set 'apk_directory' in config file to analyze all APKs in that directory")
+            return -1
+    
     return runGatorOnAPKDirect(configs.APK_NAME,\
      configs.GATOR_OPTIONS,\
      configs.KEEP_DECODE, configs = configs)
