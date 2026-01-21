@@ -2,7 +2,7 @@
   "gator_root": "C:\\Code\\experiment\\Gator",
   "adk_root": "D:\\AndroidSDK",
   "java_memory": "12G",
-  "apktool_jar": "apktool_2.9.1.jar",
-  "apk_directory": "C:\\Code\\experiment\\Gator\\AndroidBench\\apk",
+  "apktool_jar": "apktool\\apktool_2.9.1.jar",
+  "apk_directory": "C:\\apks\\new",
   "analysis_timeout": 600
 }

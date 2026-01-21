@@ -3,3 +3,5 @@ output
 AndroidBench/apv/pdfview/
 *.project
 *.apk
+temp
+bak
